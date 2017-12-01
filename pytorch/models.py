@@ -199,11 +199,11 @@ class Seq2Seq(nn.Module):
 
         # normalize to unit ball (l2 norm of 1) - p=2, dim=1
         norms = torch.norm(hidden, 2, 1)
-        
+
         # For older versions of PyTorch use:
-        hidden = torch.div(hidden, norms.expand_as(hidden))
+        #hidden = torch.div(hidden, norms.expand_as(hidden))
         # For newest version of PyTorch (as of 8/25) use this:
-        # hidden = torch.div(hidden, norms.unsqueeze(1).expand_as(hidden))
+        hidden = torch.div(hidden, norms.unsqueeze(1).expand_as(hidden))
 
         if noise and self.noise_radius > 0:
             gauss_noise = torch.normal(means=torch.zeros(hidden.size()),
@@ -268,9 +268,9 @@ class Seq2Seq(nn.Module):
                 probs = F.softmax(overvocab/temp)
                 indices = torch.multinomial(probs, 1)
 
-            all_indices.append(indices)
+            all_indices.append(indices.unsqueeze(1))
 
-            embedding = self.embedding_decoder(indices)
+            embedding = self.embedding_decoder(indices.unsqueeze(1))
             inputs = torch.cat([embedding, hidden.unsqueeze(1)], 2)
 
         max_indices = torch.cat(all_indices, 1)
