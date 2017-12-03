@@ -257,6 +257,7 @@ class Seq2Seq(nn.Module):
 
         # unroll
         all_indices = []
+        # print (maxlen)
         for i in range(maxlen):
             output, state = self.decoder(inputs, state)
             overvocab = self.linear(output.squeeze(1))
@@ -268,9 +269,14 @@ class Seq2Seq(nn.Module):
                 probs = F.softmax(overvocab/temp)
                 indices = torch.multinomial(probs, 1)
 
-            all_indices.append(indices.unsqueeze(1))
+            # print(len(indices))
+            if indices.dim() == 1:
+                indices = indices.unsqueeze(1)
 
-            embedding = self.embedding_decoder(indices.unsqueeze(1))
+            all_indices.append(indices)
+
+            # print (indices.size())
+            embedding = self.embedding_decoder(indices)
             inputs = torch.cat([embedding, hidden.unsqueeze(1)], 2)
 
         max_indices = torch.cat(all_indices, 1)

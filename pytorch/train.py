@@ -296,6 +296,7 @@ def train_lm(eval_path, save_path):
         noise.data.normal_(0, 1)
 
         fake_hidden = gan_gen(noise)
+        # print ("Calling AE.generate")
         max_indices = autoencoder.generate(fake_hidden, args.maxlen)
         indices.append(max_indices.data.cpu().numpy())
 
