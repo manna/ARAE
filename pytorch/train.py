@@ -296,6 +296,7 @@ def train_lm(eval_path, save_path):
         noise.data.normal_(0, 1)
 
         fake_hidden = gan_gen(noise)
+        # print ("Calling AE.generate")
         max_indices = autoencoder.generate(fake_hidden, args.maxlen)
         indices.append(max_indices.data.cpu().numpy())
 
@@ -630,5 +631,8 @@ for epoch in range(1, args.epochs+1):
                     f.write("\nEnding Training\n")
                 sys.exit()
 
+    # Save the model at the end of every epoch
+    if epoch >= args.min_epochs:
+        save_model()
     # shuffle between epochs
     train_data = batchify(corpus.train, args.batch_size, shuffle=True)
