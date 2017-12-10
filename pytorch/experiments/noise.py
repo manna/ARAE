@@ -38,6 +38,7 @@ def main(args):
         print()
 
 def gen(vec):
+    import pdb; pdb.set_trace();
     "Generate argmax sentence from vector."
     return generate(autoencoder, gan_gen, z=vec,
                     vocab=idx2word, sample=False,
