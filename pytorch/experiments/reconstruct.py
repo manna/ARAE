@@ -2,9 +2,22 @@ from models import load_models, generate
 import torch
 from torch import nn
 from torch.autograd import Variable
+from sklearn.metrics.pairwise import cosine_similarity
 import argparse
 import numpy as np
 import json
+
+
+def get_hidden(sentence):
+    indices = []
+    for w in sentence.strip('\n').split(' '):
+            try:
+                indices.append(word2idx[w])
+            except KeyError as e:
+                indices.append(word2idx['<oov>'])
+    source = Variable(torch.LongTensor(np.array(indices)[np.newaxis]), volatile=True)
+    output = autoencoder.forward(source, [len(indices)], noise=False, encode_only=True)
+    return output.squeeze().data.numpy()
 
 
 def main(args):
@@ -14,6 +27,7 @@ def main(args):
     reconstruction_loss  = 0
     criterion_ce = nn.CrossEntropyLoss()
     num_lines = 0
+
     with open(args.output_file, 'w+') as out_file:
         with open(args.input_file, 'r') as read_file:
             for line in read_file.readlines():
@@ -43,9 +57,19 @@ if __name__ == "__main__":
                         help='file containing sentences to modify')
     parser.add_argument('--output_file', type=str,
                         help='file to write output to')
+    parser.add_argument('--get_hidden', action='store_true')
+    parser.add_argument('--sentence', type=str,
+                        help='Sentence to get hidden representation for')
     args = parser.parse_args()
     model_args, idx2word, autoencoder, gan_gen, gan_disc \
         = load_models(args.load_path)
     word2idx = json.load(open("{}/vocab.json".format(args.load_path), "r"))
 
-    main(args)
+    sentence1 = 'Students raised full-throated slogans against the government.'
+    sentence2 = 'Students raised slogans full-throated against the government.'
+
+    # sentence2 = 'The protestors raised full-throated anti-India and pro-liberation slogans'
+    output1 = get_hidden(sentence1)
+    output2 = get_hidden(sentence2)
+    sim = cosine_similarity(output1, output2)
+    print(sim[0])
