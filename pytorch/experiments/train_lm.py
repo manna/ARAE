@@ -39,7 +39,7 @@ def main(args):
     ###########################################################################
     # Generate sentences
     ###########################################################################
-    print ("Generating sentences (G->AE\n")
+    print ("Generating sentences (G->AE)\n")
     noise = torch.ones(args.ngenerations, model_args['z_size'])
     noise.normal_()
     sentences = generate(autoencoder, gan_gen, z=noise,
@@ -60,7 +60,7 @@ def main(args):
     lm = train_ngram_lm(kenlm_path=args.kenlm_path,
                         data_path=save_path+".txt",
                         output_path=save_path+".arpa",
-                        N=5)
+                        N=args.N)
 
     # load sentences to evaluate on
     print ("Load Test sentences to evaluate on trained LM\n")
@@ -72,6 +72,25 @@ def main(args):
     print ("Perplexity = " + str(ppl))
     return ppl
 
+
+def train_lm_real_data(args):
+    eval_path = args.data_path + "/test.txt"
+    # train language model on generated examples
+    print ("Training N-gram LM\n")
+    lm = train_ngram_lm(kenlm_path=args.kenlm_path,
+                        data_path=args.data_path+"/train.txt",
+                        output_path=args.data_path+".arpa",
+                        N=args.N)
+
+    # load sentences to evaluate on
+    print ("Load Test sentences to evaluate on trained LM\n")
+    with open(eval_path, 'r') as f:
+        lines = f.readlines()
+    sentences = [l.replace('\n',     '') for l in lines]
+    ppl = get_ppl(lm, sentences)
+
+    print ("Perplexity = " + str(ppl))
+    return ppl
 
 
 if __name__ == "__main__":
@@ -86,12 +105,19 @@ if __name__ == "__main__":
                         help='Number of sentences to generate')
     parser.add_argument('--N', type=int, default=5,
                         help='N-Gram')
+    parser.add_argument('--R', type=str, required=False,
+                        help='Train LM on real data')
     parser.add_argument('--noprint', action='store_true',
                         help='prevents examples from printing')
+    parser.add_argument('--real_data', action='store_true',
+                        help='Train N-Gram LM on real data')
     parser.add_argument('--sample', action='store_true',
                         help='sample when decoding for generation')
     parser.add_argument('--seed', type=int, default=1111,
                         help='random seed')
     args = parser.parse_args()
     print(vars(args))
-    main(args)
+    if args.real_data:
+        train_lm_real_data(args)
+    else:
+        main(args)
