@@ -21,7 +21,7 @@ def main(args):
         print(sents[0])
         seen = set()
         seen.add(sents[0])
-        for i in range(40):
+        for i in range(10):
             if sents[i] not in seen:
                 seen.add(sents[i])
                 a = sents[0].split()
