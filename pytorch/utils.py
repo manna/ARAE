@@ -45,7 +45,7 @@ class Dictionary(object):
             vocab_list.sort(key=lambda x: (x[1], x[0]), reverse=True)
             k = min(k, len(vocab_list))
             self.pruned_vocab = [pair[0] for pair in vocab_list[:k]]
-        # sort to make vocabulary determistic
+        # sort to make vocabulary deterministic
         self.pruned_vocab.sort()
 
         # add all chosen words to new vocabulary/dict
@@ -165,17 +165,25 @@ def length_sort(items, lengths, descending=True):
     return list(items), list(lengths)
 
 
-def train_ngram_lm(kenlm_path, data_path, output_path, N):
+def train_ngram_lm(kenlm_path, data_path, output_path, N, dedup_data_path=None):
     """
     Trains a modified Kneser-Ney n-gram KenLM from a text file.
     Creates a .arpa file to store n-grams.
     """
+    dedup_data_path = dedup_data_path or data_path
+
     # create .arpa file of n-grams
     curdir = os.path.abspath(os.path.curdir)
-    #
-    command = "bin/lmplz -o "+str(N)+" <"+os.path.join(curdir, data_path) + \
-              " >"+os.path.join(curdir, output_path)
-    os.system("cd "+os.path.join(kenlm_path, 'build')+" && "+command)
+
+    # deduplicate_cmd = "cat {} | sort -u > {}".format(
+    #     os.path.join(curdir, data_path), os.path.join(curdir, dedup_data_path)
+    #     )
+    # os.system(deduplicate_cmd)
+
+    estimate_cmd = "bin/lmplz -o {} --discount_fallback <{} >{} ".format(
+        N, os.path.join(curdir, data_path), os.path.join(curdir, output_path)
+        )
+    os.system("cd "+os.path.join(kenlm_path, 'build')+" && "+estimate_cmd)
 
     load_kenlm()
     # create language model

@@ -323,6 +323,7 @@ def train_lm(eval_path, save_path):
     # train language model on generated examples
     lm = train_ngram_lm(kenlm_path=args.kenlm_path,
                         data_path=save_path+".txt",
+                        dedup_data_path=save_path+".uniq.txt",
                         output_path=save_path+".arpa",
                         N=args.N)
 
@@ -556,10 +557,10 @@ for epoch in range(1, args.epochs+1):
                 if not args.no_earlystopping and epoch > args.min_epochs:
                     ppl = train_lm(eval_path=os.path.join(args.data_path,
                                                           "test.txt"),
-                                   save_path="output/{}/"
+                                   save_path=os.path.abspath("output/{}/"
                                              "epoch{}_step{}_lm_generations".
                                              format(args.outf, epoch,
-                                                    niter_global))
+                                                    niter_global)))
                     print("Perplexity {}".format(ppl))
                     all_ppl.append(ppl)
                     print(all_ppl)
@@ -607,8 +608,8 @@ for epoch in range(1, args.epochs+1):
     evaluate_generator(fixed_noise, "end_of_epoch_{}".format(epoch))
     if not args.no_earlystopping and epoch >= args.min_epochs:
         ppl = train_lm(eval_path=os.path.join(args.data_path, "test.txt"),
-                       save_path="./output/{}/end_of_epoch{}_lm_generations".
-                                 format(args.outf, epoch))
+                       save_path=os.path.abspath("./output/{}/end_of_epoch{}_lm_generations".
+                                 format(args.outf, epoch)))
         print("Perplexity {}".format(ppl))
         all_ppl.append(ppl)
         print(all_ppl)

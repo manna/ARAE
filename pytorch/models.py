@@ -266,7 +266,7 @@ class Seq2Seq(nn.Module):
                 vals, indices = torch.max(overvocab, 1)
             else:
                 # sampling
-                probs = F.softmax(overvocab/temp)
+                probs = F.softmax(overvocab/temp, dim=0)
                 indices = torch.multinomial(probs, 1)
 
             # print(len(indices))
