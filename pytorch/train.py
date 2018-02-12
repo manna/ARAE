@@ -18,6 +18,7 @@ from models import Seq2Seq, MLP_D, MLP_G
 
 parser = argparse.ArgumentParser(description='PyTorch ARAE for Text')
 # Path Arguments
+# TODO Load multiple corpora
 parser.add_argument('--data_path', type=str, required=True,
                     help='location of the data corpus')
 parser.add_argument('--kenlm_path', type=str, default='../Data/kenlm',
@@ -34,7 +35,7 @@ parser.add_argument('--maxlen', type=int, default=30,
 parser.add_argument('--lowercase', action='store_true',
                     help='lowercase all text')
 
-# Model Arguments
+# Model Arguments # TOOD These should be loaded from file
 parser.add_argument('--emsize', type=int, default=300,
                     help='size of word embeddings')
 parser.add_argument('--nhidden', type=int, default=300,
@@ -114,11 +115,14 @@ parser.add_argument('--cuda', action='store_true',
 args = parser.parse_args()
 print(vars(args))
 
+autoencoders_args = [args, args] # TODO load a different args per autoencoder
+
 # make output directory if it doesn't already exist
-if not os.path.isdir('./output'):
-    os.makedirs('./output')
-if not os.path.isdir('./output/{}'.format(args.outf)):
-    os.makedirs('./output/{}'.format(args.outf))
+for ae_args in autoencoders_args:
+    if not os.path.isdir('./output'):
+        os.makedirs('./output')
+    if not os.path.isdir('./output/{}'.format(ae_args.outf)):
+        os.makedirs('./output/{}'.format(ae_args.outf))
 
 # Set the random seed manually for reproducibility.
 random.seed(args.seed)
@@ -165,7 +169,8 @@ print("Loaded data!")
 ###############################################################################
 
 ntokens = len(corpus.dictionary.word2idx)
-autoencoder = Seq2Seq(emsize=args.emsize,
+
+autoencoders = [Seq2Seq(emsize=args.emsize,
                       nhidden=args.nhidden,
                       ntokens=ntokens,
                       nlayers=args.nlayers,
@@ -173,28 +178,33 @@ autoencoder = Seq2Seq(emsize=args.emsize,
                       hidden_init=args.hidden_init,
                       dropout=args.dropout,
                       gpu=args.cuda)
+                for args in autoencoders_args]
 
-gan_gen = MLP_G(ninput=args.z_size, noutput=args.nhidden, layers=args.arch_g)
-gan_disc = MLP_D(ninput=args.nhidden, noutput=1, layers=args.arch_d)
 
-print(autoencoder)
-print(gan_gen)
-print(gan_disc)
+# gan_gen = MLP_G(ninput=args.z_size, noutput=args.nhidden, layers=args.arch_g)
+gan_discs = [MLP_D(ninput=args.nhidden, noutput=1, layers=args.arch_d)
+             for args in autoencoders_args]
+print('autoencoders', autoencoders)
 
-optimizer_ae = optim.SGD(autoencoder.parameters(), lr=args.lr_ae)
-optimizer_gan_g = optim.Adam(gan_gen.parameters(),
-                             lr=args.lr_gan_g,
-                             betas=(args.beta1, 0.999))
-optimizer_gan_d = optim.Adam(gan_disc.parameters(),
-                             lr=args.lr_gan_d,
-                             betas=(args.beta1, 0.999))
+#print(gan_gen)
+#print(gan_disc)
+
+ae_optimizers = [optim.SGD(ae.parameters(), lr=args.lr_ae)
+                 for ae, args in zip(autoencoders, autoencoders_args)]
+# optimizer_gan_g = optim.Adam(gan_gen.parameters(),
+#                             lr=args.lr_gan_g,
+#                             betas=(args.beta1, 0.999)) 
+gan_d_optimizers = [optim.Adam(gan_disc.parameters(),
+                               lr=args.lr_gan_d,
+                               betas=(args.beta1, 0.999))
+                    for gan_disc, args in zip(gan_discs, autoencoders_args)]
 
 criterion_ce = nn.CrossEntropyLoss()
 
 if args.cuda:
-    autoencoder = autoencoder.cuda()
-    gan_gen = gan_gen.cuda()
-    gan_disc = gan_disc.cuda()
+    autoencoders = [ae.cuda() for ae in autoencoders]
+    #gan_gen = gan_gen.cuda()
+    gan_discs = [gd.cuda() for gd in gan_discs]
     criterion_ce = criterion_ce.cuda()
 
 ###############################################################################
@@ -204,15 +214,16 @@ if args.cuda:
 
 def save_model():
     print("Saving models")
-    with open('./output/{}/autoencoder_model.pt'.format(args.outf), 'wb') as f:
-        torch.save(autoencoder.state_dict(), f)
-    with open('./output/{}/gan_gen_model.pt'.format(args.outf), 'wb') as f:
-        torch.save(gan_gen.state_dict(), f)
-    with open('./output/{}/gan_disc_model.pt'.format(args.outf), 'wb') as f:
-        torch.save(gan_disc.state_dict(), f)
+    for autoencoder, ae_args in zip(autoencoders, autoencoders_args):
+        with open('./output/{}/autoencoder_model.pt'.format(ae_args.outf), 'wb') as f:
+            torch.save(autoencoder.state_dict(), f)
+        with open('./output/{}/gan_gen_model.pt'.format(ae_args.outf), 'wb') as f:
+            torch.save(gan_gen.state_dict(), f)
+        with open('./output/{}/gan_disc_model.pt'.format(ae_args.outf), 'wb') as f:
+            torch.save(gan_disc.state_dict(), f)
 
 
-def evaluate_autoencoder(data_source, epoch):
+def evaluate_autoencoder(autoencoder, ae_args, data_source, epoch):
     # Turn on evaluation mode which disables dropout.
     autoencoder.eval()
     total_loss = 0
@@ -243,7 +254,7 @@ def evaluate_autoencoder(data_source, epoch):
             torch.mean(max_indices.eq(masked_target).float()).data[0]
         bcnt += 1
 
-        aeoutf = "./output/%s/%d_autoencoder.txt" % (args.outf, epoch)
+        aeoutf = "./output/%s/%d_autoencoder.txt" % (ae_args.outf, epoch)
         with open(aeoutf, "a") as f:
             max_values, max_indices = torch.max(output, 2)
             max_indices = \
@@ -336,7 +347,9 @@ def train_lm(eval_path, save_path):
     return ppl
 
 
-def train_ae(batch, total_loss_ae, start_time, i):
+def train_ae(ae_index, batch, total_loss_ae, start_time, i):
+    autoencoder, ae_optimizer = autoencoders[ae_index], ae_optimizers[ae_index]
+    
     autoencoder.train()
     autoencoder.zero_grad()
 
@@ -363,7 +376,7 @@ def train_ae(batch, total_loss_ae, start_time, i):
 
     # `clip_grad_norm` to prevent exploding gradient in RNNs / LSTMs
     torch.nn.utils.clip_grad_norm(autoencoder.parameters(), args.clip)
-    optimizer_ae.step()
+    ae_optimizer.step()
 
     total_loss_ae += loss.data
 
@@ -413,21 +426,26 @@ def train_gan_g():
     return errG
 
 
-def grad_hook(grad):
-    # Gradient norm: regularize to be same
-    # code_grad_gan * code_grad_ae / norm(code_grad_gan)
-    if args.enc_grad_norm:
-        gan_norm = torch.norm(grad, 2, 1).detach().data.mean()
-        normed_grad = grad * autoencoder.grad_norm / gan_norm
-    else:
-        normed_grad = grad
+def make_grad_hook(autoencoder):
+    def grad_hook(grad):
+        # Gradient norm: regularize to be same
+        # code_grad_gan * code_grad_ae / norm(code_grad_gan)
+        if args.enc_grad_norm:
+            gan_norm = torch.norm(grad, 2, 1).detach().data.mean()
+            normed_grad = grad * autoencoder.grad_norm / gan_norm
+        else:
+            normed_grad = grad
 
-    # weight factor and sign flip
-    normed_grad *= -math.fabs(args.gan_toenc)
-    return normed_grad
+        # weight factor and sign flip
+        normed_grad *= -math.fabs(args.gan_toenc)
+        return normed_grad
+    return grad_hook
 
 
-def train_gan_d(batch):
+def train_gan_d(ae_index,  batch):
+    autoencoder, optimizer_ae = autoencoders[ae_index], ae_optimizers[ae_index]
+    gan_disc, optimizer_gan_d = gan_discs[ae_index], gan_d_optimizers[ae_index]     
+
     # clamp parameters to a cube
     for p in gan_disc.parameters():
         p.data.clamp_(-args.gan_clamp, args.gan_clamp)
@@ -445,31 +463,44 @@ def train_gan_d(batch):
 
     # batch_size x nhidden
     real_hidden = autoencoder(source, lengths, noise=False, encode_only=True)
-    real_hidden.register_hook(grad_hook)
+    real_hidden.register_hook(make_grad_hook(autoencoder))
 
     # loss / backprop
     errD_real = gan_disc(real_hidden)
     errD_real.backward(one)
 
-    # negative samples ----------------------------
-    # generate fake codes
-    noise = to_gpu(args.cuda,
-                   Variable(torch.ones(args.batch_size, args.z_size)))
-    noise.data.normal_(0, 1)
+    # negative samples ----------------------------i
+    # generate fake codes 
+    # noise = to_gpu(args.cuda, Variable(torch.ones(args.batch_size, args.z_size)))
+    # noise.data.normal_(0, 1)
+    
+    fake_hiddens = []
+    for other_index, other_autoencoder in enumerate(autoencoders):
+        if other_index == ae_index: continue
+        fake_hidden = other_autoencoder(source, lengths, noise=False, encode_only=True) # TODO: noise=True
+        fake_hidden.register_hook(make_grad_hook(other_autoencoder)) # maybe register hook? Not sure. 
+        fake_hiddens.append(fake_hidden)        
 
     # loss / backprop
-    fake_hidden = gan_gen(noise)
-    errD_fake = gan_disc(fake_hidden.detach())
-    errD_fake.backward(mone)
+    # fake_hidden = gan_gen(noise)
+    total_errD_fake = None
+    errD_fakes = [gan_disc(fake_hidden.detach()) for fake_hidden in fake_hiddens]
+    for errD_fake in errD_fakes:
+        errD_fake.backward(mone)
+        if total_errD_fake is None:
+            total_errD_fake = errD_fake
+        else:
+            total_errD_fake += errD_fake
+    # Alernatively, we might prefer: total_errD_fake.backward(mone)
 
     # `clip_grad_norm` to prvent exploding gradient problem in RNNs / LSTMs
     torch.nn.utils.clip_grad_norm(autoencoder.parameters(), args.clip)
 
     optimizer_gan_d.step()
     optimizer_ae.step()
-    errD = -(errD_real - errD_fake)
+    errD = -(errD_real - total_errD_fake)
 
-    return errD, errD_real, errD_fake
+    return errD, errD_real, total_errD_fake
 
 
 print("Training...")
@@ -501,7 +532,7 @@ for epoch in range(1, args.epochs+1):
             f.write("GAN training loop schedule increased to {}\n".
                     format(niter_gan))
 
-    total_loss_ae = 0
+    total_loss_ae = 0 # TODO: ae_total_losses = [0]*len(autoencoders)
     epoch_start_time = time.time()
     start_time = time.time()
     niter = 0
@@ -510,12 +541,13 @@ for epoch in range(1, args.epochs+1):
     # loop through all batches in training data
     while niter < len(train_data):
 
-        # train autoencoder ----------------------------
+        # train autoencoders ----------------------------
         for i in range(args.niters_ae):
             if niter == len(train_data):
                 break  # end of epoch
-            total_loss_ae, start_time = \
-                train_ae(train_data[niter], total_loss_ae, start_time, niter)
+            for ae_index in range(len(autoencoders)):
+                total_loss_ae, start_time = \
+                    train_ae(ae_index, train_data[niter], total_loss_ae, start_time, niter)
             niter += 1
 
         # train gan ----------------------------------
@@ -524,12 +556,13 @@ for epoch in range(1, args.epochs+1):
             # train discriminator/critic
             for i in range(args.niters_gan_d):
                 # feed a seen sample within this epoch; good for early training
-                errD, errD_real, errD_fake = \
-                    train_gan_d(train_data[random.randint(0, len(train_data)-1)])
+                for ae_index in range(len(autoencoders)):
+                    errD, errD_real, errD_fake = \
+                        train_gan_d(ae_index, train_data[random.randint(0, len(train_data)-1)])
 
             # train generator
-            for i in range(args.niters_gan_g):
-                errG = train_gan_g()
+            # for i in range(args.niters_gan_g):
+            #    errG = train_gan_g()
 
         niter_global += 1
         if niter_global % 100 == 0:
