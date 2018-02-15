@@ -38,6 +38,8 @@ python2 snli_preprocessing.py --in_path ./snli_1.0 --out_path ./Data/snli_lm
 # python2 train.py --data_path ./Data/snli_lm --cuda --no_earlystopping
 python2 train.py --data_path ./Data/snli_lm --cuda --kenlm_path ./kenlm --min_epochs 6
 # python2 train.py --data_path ./Data/mnli_lm_fiction --cuda --no_earlystopping --epochs 25
+# python2 train.py --data_path ./Data/mnli_lm_fiction --cuda --kenlm_path ./kenlm --min_epochs 10 --epochs 50
+
 
 # Save results
 cp ./output/example/* /artifacts/
