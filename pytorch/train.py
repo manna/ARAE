@@ -574,12 +574,12 @@ for epoch in range(1, args.epochs+1):
 
         # train autoencoders ----------------------------
         for i in range(args.niters_ae):
-            if ae_args.epoch_args.niter == len(ae_args.train_data):
-                break  # end of epoch
             for ae_index, ae_args in enumerate(autoencoders_args):
+                if ae_args.epoch_args.niter == len(ae_args.train_data):
+                    continue  # end of epoch
                 ae_args.epoch_args.total_loss_ae, ae_args.epoch_args.start_time = \
                     train_ae(ae_index, ae_args.train_data[ae_args.epoch_args.niter], ae_args.epoch_args.total_loss_ae, ae_args.epoch_args.start_time, ae_args.epoch_args.niter)
-            ae_args.epoch_args.niter += 1
+                ae_args.epoch_args.niter += 1
 
         # train gan ----------------------------------
         for k in range(niter_gan):
