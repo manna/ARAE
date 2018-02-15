@@ -7,6 +7,7 @@ import numpy as np
 import random
 import sys
 import json
+import itertools
 
 import torch
 import torch.nn as nn
@@ -18,53 +19,21 @@ from utils import to_gpu, Corpus, batchify, train_ngram_lm, get_ppl
 from models import Seq2Seq, MLP_D, MLP_G
 
 parser = argparse.ArgumentParser(description='PyTorch ARAE for Text')
+
 # Path Arguments
-# TODO Load multiple corpora
-parser.add_argument('--data_path', type=str, required=True,
-                    help='location of the data corpus')
 parser.add_argument('--kenlm_path', type=str, default='../Data/kenlm',
                     help='path to kenlm directory')
 parser.add_argument('--outf', type=str, default='example',
                     help='output directory name')
-
-# Data Processing Arguments
-parser.add_argument('--vocab_size', type=int, default=11000,
-                    help='cut vocabulary down to this size '
-                         '(most frequently seen words in train)')
-parser.add_argument('--maxlen', type=int, default=30,
-                    help='maximum sentence length')
-parser.add_argument('--lowercase', action='store_true',
-                    help='lowercase all text')
-
-# Model Arguments # TOOD These should be loaded from file
-parser.add_argument('--emsize', type=int, default=300,
-                    help='size of word embeddings')
-parser.add_argument('--nhidden', type=int, default=300,
-                    help='number of hidden units per layer')
-parser.add_argument('--nlayers', type=int, default=1,
-                    help='number of layers')
-parser.add_argument('--noise_radius', type=float, default=0.2,
-                    help='stdev of noise for autoencoder (regularizer)')
-parser.add_argument('--noise_anneal', type=float, default=0.995,
-                    help='anneal noise_radius exponentially by this'
-                         'every 100 iterations')
-parser.add_argument('--hidden_init', action='store_true',
-                    help="initialize decoder hidden state with encoder's")
-parser.add_argument('--arch_g', type=str, default='300-300',
-                    help='generator architecture (MLP)')
-parser.add_argument('--arch_d', type=str, default='300-300',
-                    help='critic/discriminator architecture (MLP)')
-parser.add_argument('--z_size', type=int, default=100,
-                    help='dimension of random noise z to feed into generator')
+# Model Arguments
+# parser.add_argument('--z_size', type=int, default=100,
+#                     help='dimension of random noise z to feed into generator')
 parser.add_argument('--temp', type=float, default=1,
                     help='softmax temperature (lower --> more discrete)')
 parser.add_argument('--enc_grad_norm', type=bool, default=True,
                     help='norm code gradient from critic->encoder')
 parser.add_argument('--gan_toenc', type=float, default=-0.01,
                     help='weight factor passing gradient from gan to encoder')
-parser.add_argument('--dropout', type=float, default=0.0,
-                    help='dropout applied to layers (0 = no dropout)')
-
 # Training Arguments
 parser.add_argument('--epochs', type=int, default=15,
                     help='maximum number of epochs')
@@ -113,10 +82,58 @@ parser.add_argument('--seed', type=int, default=1111,
 parser.add_argument('--cuda', action='store_true',
                     help='use CUDA')
 
-args = parser.parse_args()
-print(vars(args))
 
-autoencoders_args = [args, args] # TODO load a different args per autoencoder
+ae_parser = argparse.ArgumentParser(description='Autoencoder Arguments Parser')
+# Path arguments
+ae_parser.add_argument('--data_path', type=str, required=True,
+                    help='location of the data corpus')
+ae_parser.add_argument('--outf', type=str, default='example',
+                    help='output directory name')
+# Data Processing Arguments
+ae_parser.add_argument('--vocab_size', type=int, default=11000,
+                    help='cut vocabulary down to this size '
+                         '(most frequently seen words in train)')
+ae_parser.add_argument('--maxlen', type=int, default=30,
+                    help='maximum sentence length')
+ae_parser.add_argument('--lowercase', action='store_true',
+                    help='lowercase all text')
+# Model Arguments
+ae_parser.add_argument('--emsize', type=int, default=300,
+                    help='size of word embeddings')
+ae_parser.add_argument('--nhidden', type=int, default=300,
+                    help='number of hidden units per layer')
+ae_parser.add_argument('--nlayers', type=int, default=1,
+                    help='number of layers')
+ae_parser.add_argument('--noise_radius', type=float, default=0.2,
+                    help='stdev of noise for autoencoder (regularizer)')
+ae_parser.add_argument('--noise_anneal', type=float, default=0.995,
+                    help='anneal noise_radius exponentially by this'
+                         'every 100 iterations')
+ae_parser.add_argument('--hidden_init', action='store_true',
+                    help="initialize decoder hidden state with encoder's")
+ae_parser.add_argument('--arch_g', type=str, default='300-300',
+                    help='generator architecture (MLP)')
+ae_parser.add_argument('--arch_d', type=str, default='300-300',
+                    help='critic/discriminator architecture (MLP)')
+ae_parser.add_argument('--dropout', type=float, default=0.0,
+                help='dropout applied to layers (0 = no dropout)')
+
+mycommands=['ae{}'.format(i) for i in range(5)]
+def groupargs(arg,currentarg=[None]):
+    if(arg in mycommands):currentarg[0]=arg
+    return currentarg[0]
+
+commandlines=[list(args) for cmd,args in itertools.groupby(sys.argv[1:],groupargs)]
+
+args = parser.parse_args(commandlines[0])
+autoencoders_args = [ae_parser.parse_args(cl[1:]) for cl in commandlines[1:]]
+
+print '='*8+'ARGUMENTS'+'='*8
+print vars(args), '\n'
+for ae_args in autoencoders_args:
+    print '-'*24
+    print vars(ae_args)
+print '='*24
 
 # make output directory if it doesn't already exist
 for ae_args in autoencoders_args:
@@ -168,7 +185,7 @@ for ae_args in autoencoders_args:
 
     eval_batch_size = 10
     ae_args.test_data = batchify(ae_args.corpus.test, eval_batch_size, shuffle=False)
-    ae_args.train_data = batchify(ae_args.corpus.train, ae_args.batch_size, shuffle=True)
+    ae_args.train_data = batchify(ae_args.corpus.train, args.batch_size, shuffle=True)
 
 print("Loaded data!")
 
@@ -196,13 +213,13 @@ print('autoencoders', autoencoders)
 #print(gan_gen)
 #print(gan_disc)
 
-ae_optimizers = [optim.SGD(ae.parameters(), lr=ae_args.lr_ae)
+ae_optimizers = [optim.SGD(ae.parameters(), lr=args.lr_ae)
                  for ae, ae_args in zip(autoencoders, autoencoders_args)]
 # optimizer_gan_g = optim.Adam(gan_gen.parameters(),
 #                             lr=args.lr_gan_g,
 #                             betas=(args.beta1, 0.999)) 
 gan_d_optimizers = [optim.Adam(gan_disc.parameters(),
-                               lr=ae_args.lr_gan_d,
+                               lr=args.lr_gan_d,
                                betas=(args.beta1, 0.999))
                     for gan_disc, ae_args in zip(gan_discs, autoencoders_args)]
 
@@ -525,9 +542,9 @@ else:
     gan_schedule = []
 niter_gan = 1
 
-fixed_noise = to_gpu(args.cuda,
-                     Variable(torch.ones(args.batch_size, args.z_size)))
-fixed_noise.data.normal_(0, 1)
+# fixed_noise = to_gpu(args.cuda,
+#                      Variable(torch.ones(args.batch_size, args.z_size)))
+# fixed_noise.data.normal_(0, 1)
 one = to_gpu(args.cuda, torch.FloatTensor([1]))
 mone = one * -1
 
@@ -683,4 +700,4 @@ for epoch in range(1, args.epochs+1):
         save_model()
     # shuffle between epochs
     for ae_args in autoencoders_args:
-        ae_args.train_data = batchify(ae_args.corpus.train, ae_args.batch_size, shuffle=True)
+        ae_args.train_data = batchify(ae_args.corpus.train, args.batch_size, shuffle=True)
