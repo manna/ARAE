@@ -3,26 +3,26 @@
 pip install http://download.pytorch.org/whl/cu80/torch-0.3.0.post4-cp27-cp27mu-linux_x86_64.whl 
 
 # cmake
-apt-get install software-properties-common
-echo | add-apt-repository ppa:george-edison55/cmake-3.x
-yes | apt-get update
-yes | apt-get install cmake
+# apt-get install software-properties-common
+# echo | add-apt-repository ppa:george-edison55/cmake-3.x
+# yes | apt-get update
+# yes | apt-get install cmake
 
 # KenLM
-yes | apt-get install libboost-all-dev
-curl -O http://kheafield.com/code/kenlm.tar.gz
-tar xvzf kenlm.tar.gz
-cd kenlm
-mkdir -p build
-cd build
-cmake ..
-make -j 4
-cd ../..
-yes | pip install https://github.com/kpu/kenlm/archive/master.zip
+# yes | apt-get install libboost-all-dev
+# curl -O http://kheafield.com/code/kenlm.tar.gz
+# tar xvzf kenlm.tar.gz
+# cd kenlm
+# mkdir -p build
+# cd build
+# cmake ..
+# make -j 4
+# cd ../..
+# yes | pip install https://github.com/kpu/kenlm/archive/master.zip
 
-cd kenlm/lm/builder
-bjam # compile with bjam
-cd ../../..
+# cd kenlm/lm/builder
+# bjam # compile with bjam
+# cd ../../..
 
 # SNLI Data Preparation
 # curl -O https://nlp.stanford.edu/projects/snli/snli_1.0.zip
@@ -36,8 +36,8 @@ cd ../../..
 
 # Train
 echo "Running train.py"
-# python2 train.py --cuda --no_earlystopping ae0 --data_path ./Data/snli_lm ae1 --data_path ./Data/snli_lm 
-python2 train.py --cuda --no_earlystopping --epochs 10 ae0 --data_path ./Data/mnli_lm_fiction ae1 --data_path ./Data/mnli_lm_telephone
+#python2 train.py --cuda --no_earlystopping --epochs 25 ae0 --data_path ./Data/snli_lm ae1 --data_path ./Data/snli_lm 
+python2 train.py --cuda --no_earlystopping --epochs 25 ae0 --data_path ./Data/mnli_lm_telephone ae1 --data_path ./Data/mnli_lm_fiction
 
 # Incorrectly formatted commands:
 # python2 train.py --data_path ./Data/snli_lm --cuda --no_earlystopping
