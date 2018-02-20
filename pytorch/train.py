@@ -18,7 +18,7 @@ from torch.autograd import Variable
 from utils import to_gpu, Corpus, batchify, train_ngram_lm, get_ppl
 from models import Seq2Seq, MLP_D, MLP_G
 
-parser = argparse.ArgumentParser(description='PyTorch ARAE for Text')
+parser = argparse.ArgumentParser(description='PyTorch Aligned Autoencoders')
 
 # Path Arguments
 parser.add_argument('--kenlm_path', type=str, default='../Data/kenlm',
@@ -118,10 +118,11 @@ ae_parser.add_argument('--arch_d', type=str, default='300-300',
 ae_parser.add_argument('--dropout', type=float, default=0.0,
                 help='dropout applied to layers (0 = no dropout)')
 
-mycommands=['ae{}'.format(i) for i in range(5)]
-def groupargs(arg,currentarg=[None]):
-    if(arg in mycommands):currentarg[0]=arg
-    return currentarg[0]
+# is_delim=['ae{}'.format(i) for i in range(5)].__contains__
+is_delim=lambda x:x.startswith('ae')
+def groupargs(arg, current_group=[0]):
+    if(is_delim(arg)):current_group[0]+=1
+    return current_group[0]
 
 commandlines=[list(args) for cmd,args in itertools.groupby(sys.argv[1:],groupargs)]
 
@@ -134,6 +135,8 @@ for ae_args in autoencoders_args:
     print '-'*24
     print vars(ae_args)
 print '='*24
+
+sys.exit(0)
 
 # make output directory if it doesn't already exist
 for ae_args in autoencoders_args:
@@ -570,7 +573,7 @@ for epoch in range(1, args.epochs+1):
         )
 
     # loop through all batches in training data
-    while any(ae_args.epoch_args.niter < len(ae_args.train_data) for ae_args in autoencoders_args):
+    while all(ae_args.epoch_args.niter < len(ae_args.train_data) for ae_args in autoencoders_args):
 
         # train autoencoders ----------------------------
         for i in range(args.niters_ae):
