@@ -2,6 +2,7 @@ import os
 import torch
 import numpy as np
 import random
+import sys
 
 
 def load_kenlm():
@@ -184,10 +185,10 @@ def train_ngram_lm(kenlm_path, data_path, output_path, N, dedup_data_path=None):
         N, os.path.join(curdir, data_path), os.path.join(curdir, output_path)
         )
     os.system("cd "+os.path.join(kenlm_path, 'build')+" && "+estimate_cmd)
-
+    
     load_kenlm()
     # create language model
-    model = kenlm.Model(output_path)
+    model = kenlm.Model(os.path.join(curdir, output_path))
 
     return model
 
