@@ -21,7 +21,7 @@ parser = argparse.ArgumentParser(description='PyTorch ARAE for Text')
 # Path Arguments
 parser.add_argument('--data_path', type=str, required=True,
                     help='location of the data corpus')
-parser.add_argument('--kenlm_path', type=str, default='../Data/kenlm',
+parser.add_argument('--kenlm_path', type=str, default='./kenlm',
                     help='path to kenlm directory')
 parser.add_argument('--outf', type=str, default='example',
                     help='output directory name')

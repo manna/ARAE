@@ -21,13 +21,13 @@ from models import Seq2Seq, MLP_D, MLP_G
 parser = argparse.ArgumentParser(description='PyTorch Aligned Autoencoders')
 
 # Path Arguments
-parser.add_argument('--kenlm_path', type=str, default='../Data/kenlm',
+parser.add_argument('--kenlm_path', type=str, default='./kenlm',
                     help='path to kenlm directory')
 parser.add_argument('--outf', type=str, default='example',
                     help='output directory name')
 # Model Arguments
-# parser.add_argument('--z_size', type=int, default=100,
-#                     help='dimension of random noise z to feed into generator')
+parser.add_argument('--z_size', type=int, default=100,
+                    help='dimension of random noise z to feed into generator')
 parser.add_argument('--temp', type=float, default=1,
                     help='softmax temperature (lower --> more discrete)')
 parser.add_argument('--enc_grad_norm', type=bool, default=True,
@@ -136,12 +136,12 @@ for ae_args in autoencoders_args:
     print vars(ae_args)
 print '='*24
 
-sys.exit(0)
-
 # make output directory if it doesn't already exist
+if not os.path.isdir('./output'):
+    os.makedirs('./output')
+if not os.path.isdir('./output/{}'.format(args.outf)):
+    os.makedirs('./output/{}'.format(args.outf))
 for ae_args in autoencoders_args:
-    if not os.path.isdir('./output'):
-        os.makedirs('./output')
     if not os.path.isdir('./output/{}'.format(ae_args.outf)):
         os.makedirs('./output/{}'.format(ae_args.outf))
 
@@ -177,14 +177,11 @@ for ae_args in autoencoders_args:
     print("Vocabulary Size: {}".format(ntokens))
     ae_args.ntokens = ntokens
     
-    """
-    TODO: Where to write these?
-    with open('./output/{}/args.json'.format(args.outf), 'w') as f:
-        json.dump(vars(ae_args), f)
-    with open("./output/{}/logs.txt".format(args.outf), 'w') as f:
-        f.write(str(vars(ae_args)))
-        f.write("\n\n")
-    """
+    # with open('./output/{}/args.json'.format(ae_args.outf), 'w') as f:
+    #     json.dump(vars(ae_args), f)
+    # with open("./output/{}/logs.txt".format(ae_args.outf), 'w') as f:
+    #     f.write(str(vars(ae_args)))
+    #     f.write("\n\n")
 
     eval_batch_size = 10
     ae_args.test_data = batchify(ae_args.corpus.test, eval_batch_size, shuffle=False)
@@ -208,29 +205,29 @@ autoencoders = [Seq2Seq(emsize=ae_args.emsize,
                 for ae_args in autoencoders_args]
 
 
-# gan_gen = MLP_G(ninput=args.z_size, noutput=args.nhidden, layers=args.arch_g)
+gan_gens = [MLP_G(ninput=args.z_size, noutput=ae_args.nhidden, layers=ae_args.arch_g)
+            for ae_args in autoencoders_args]
 gan_discs = [MLP_D(ninput=ae_args.nhidden, noutput=1, layers=ae_args.arch_d)
              for ae_args in autoencoders_args]
 print('autoencoders', autoencoders)
 
-#print(gan_gen)
-#print(gan_disc)
 
 ae_optimizers = [optim.SGD(ae.parameters(), lr=args.lr_ae)
                  for ae, ae_args in zip(autoencoders, autoencoders_args)]
-# optimizer_gan_g = optim.Adam(gan_gen.parameters(),
-#                             lr=args.lr_gan_g,
-#                             betas=(args.beta1, 0.999)) 
+gan_g_optimizers = [optim.Adam(gan_gen.parameters(),
+                               lr=args.lr_gan_g,
+                               betas=(args.beta1, 0.999)) 
+                    for gan_gen in gan_gens]
 gan_d_optimizers = [optim.Adam(gan_disc.parameters(),
                                lr=args.lr_gan_d,
                                betas=(args.beta1, 0.999))
-                    for gan_disc, ae_args in zip(gan_discs, autoencoders_args)]
+                    for gan_disc in gan_discs]
 
 criterion_ce = nn.CrossEntropyLoss()
 
 if args.cuda:
     autoencoders = [ae.cuda() for ae in autoencoders]
-    #gan_gen = gan_gen.cuda()
+    gan_gens = [gg.cuda() for gg in gan_gens]
     gan_discs = [gd.cuda() for gd in gan_discs]
     criterion_ce = criterion_ce.cuda()
 
@@ -241,11 +238,11 @@ if args.cuda:
 
 def save_model():
     print("Saving models")
-    for autoencoder, gan_disc, ae_args in zip(autoencoders, gan_discs, autoencoders_args):
+    for autoencoder, gan_disc, gan_gen, ae_args in zip(autoencoders, gan_discs, gan_gens, autoencoders_args):
         with open('./output/{}/autoencoder_model.pt'.format(ae_args.outf), 'wb') as f:
             torch.save(autoencoder.state_dict(), f)
-        # with open('./output/{}/gan_gen_model.pt'.format(ae_args.outf), 'wb') as f:
-            # torch.save(gan_gen.state_dict(), f)
+        with open('./output/{}/gan_gen_model.pt'.format(ae_args.outf), 'wb') as f:
+            torch.save(gan_gen.state_dict(), f)
         with open('./output/{}/gan_disc_model.pt'.format(ae_args.outf), 'wb') as f:
             torch.save(gan_disc.state_dict(), f)
 
@@ -303,20 +300,23 @@ def evaluate_autoencoder(autoencoder, ae_args, data_source, epoch):
     return total_loss[0] / len(data_source), all_accuracies/bcnt
 
 
-def evaluate_generator(noise, epoch):
+def evaluate_generator(ae_index, noise, epoch):
+    gan_gen, autoencoder, ae_args = \
+        gan_gens[ae_index], autoencoders[ae_index], autoencoders_args[ae_index]
+
     gan_gen.eval()
     autoencoder.eval()
 
     # generate from fixed random noise
     fake_hidden = gan_gen(noise)
     max_indices = \
-        autoencoder.generate(fake_hidden, args.maxlen, sample=args.sample)
+        autoencoder.generate(fake_hidden, ae_args.maxlen, sample=args.sample)
 
-    with open("./output/%s/%s_generated.txt" % (args.outf, epoch), "w") as f:
+    with open("./output/%s/%s_generated.txt" % (ae_args.outf, epoch), "w") as f:
         max_indices = max_indices.data.cpu().numpy()
         for idx in max_indices:
             # generated sentence
-            words = [corpus.dictionary.idx2word[x] for x in idx]
+            words = [ae_args.corpus.dictionary.idx2word[x] for x in idx]
             # truncate sentences to first occurrence of <eos>
             truncated_sent = []
             for w in words:
@@ -328,8 +328,12 @@ def evaluate_generator(noise, epoch):
             f.write(chars)
             f.write("\n")
 
-"""
-def train_lm(eval_path, save_path):
+
+def train_lm(ae_index, eval_path, save_path):
+    gan_gen, autoencoder, ae_args = \
+        gan_gens[ae_index], autoencoders[ae_index], autoencoders_args[ae_index]
+
+
     # generate examples
     indices = []
     noise = to_gpu(args.cuda, Variable(torch.ones(100, args.z_size)))
@@ -338,7 +342,7 @@ def train_lm(eval_path, save_path):
 
         fake_hidden = gan_gen(noise)
         # print ("Calling AE.generate")
-        max_indices = autoencoder.generate(fake_hidden, args.maxlen)
+        max_indices = autoencoder.generate(fake_hidden, ae_args.maxlen)
         indices.append(max_indices.data.cpu().numpy())
 
     indices = np.concatenate(indices, axis=0)
@@ -346,11 +350,11 @@ def train_lm(eval_path, save_path):
     # write generated sentences to text file
     with open(save_path+".txt", "w") as f:
         # laplacian smoothing
-        for word in corpus.dictionary.word2idx.keys():
+        for word in ae_args.corpus.dictionary.word2idx.keys():
             f.write(word+"\n")
         for idx in indices:
             # generated sentence
-            words = [corpus.dictionary.idx2word[x] for x in idx]
+            words = [ae_args.corpus.dictionary.idx2word[x] for x in idx]
             # truncate sentences to first occurrence of <eos>
             truncated_sent = []
             for w in words:
@@ -375,7 +379,7 @@ def train_lm(eval_path, save_path):
     ppl = get_ppl(lm, sentences)
 
     return ppl
-"""
+
 
 def train_ae(ae_index, batch, total_loss_ae, start_time, i):
     autoencoder, ae_optimizer = autoencoders[ae_index], ae_optimizers[ae_index]
@@ -426,7 +430,7 @@ def train_ae(ae_index, batch, total_loss_ae, start_time, i):
                       elapsed * 1000 / args.log_interval,
                       cur_loss, math.exp(cur_loss), accuracy))
 
-        with open("./output/{}/logs.txt".format(args.outf), 'a') as f:
+        with open("./output/{}/logs.txt".format(ae_args.outf), 'a') as f:
             f.write('| epoch {:3d} | {:5d}/{:5d} batches | ms/batch {:5.2f} | '
                     'loss {:5.2f} | ppl {:8.2f} | acc {:8.2f}\n'.
                     format(epoch, i, len(ae_args.train_data),
@@ -439,7 +443,10 @@ def train_ae(ae_index, batch, total_loss_ae, start_time, i):
     return total_loss_ae, start_time
 
 
-def train_gan_g():
+def train_gan_g(ae_index):
+    gan_gen, optimizer_gan_g = gan_gens[ae_index], gan_g_optimizers[ae_index]
+    gan_disc =  gan_discs[ae_index]
+
     gan_gen.train()
     gan_gen.zero_grad()
 
@@ -515,7 +522,7 @@ def train_gan_d(ae_index,  batch):
     # loss / backprop
     # fake_hidden = gan_gen(noise)
     total_errD_fake = None
-    errD_fakes = [gan_disc(fake_hidden.detach()) for fake_hidden in fake_hiddens]
+    errD_fakes = [gan_disc(fh.detach()) for fh in fake_hiddens]
     for errD_fake in errD_fakes:
         errD_fake.backward(mone)
         if total_errD_fake is None:
@@ -545,15 +552,13 @@ else:
     gan_schedule = []
 niter_gan = 1
 
-# fixed_noise = to_gpu(args.cuda,
-#                      Variable(torch.ones(args.batch_size, args.z_size)))
-# fixed_noise.data.normal_(0, 1)
+fixed_noise = to_gpu(args.cuda,
+                     Variable(torch.ones(args.batch_size, args.z_size)))
+fixed_noise.data.normal_(0, 1)
 one = to_gpu(args.cuda, torch.FloatTensor([1]))
 mone = one * -1
 
-best_ppl = None
 impatience = 0
-all_ppl = []
 for epoch in range(1, args.epochs+1):
     # update gan training schedule
     if epoch in gan_schedule:
@@ -569,7 +574,13 @@ for epoch in range(1, args.epochs+1):
             epoch_start_time=time.time(),
             start_time=time.time(),
             niter=0,
-            niter_global=1
+            niter_global=1,
+            errD=0,
+            errD_real=0,
+            errD_fake=0,
+            errG=0,
+            best_ppl=None,
+            all_ppl=[]
         )
 
     # loop through all batches in training data
@@ -591,55 +602,57 @@ for epoch in range(1, args.epochs+1):
             for i in range(args.niters_gan_d):
                 # feed a seen sample within this epoch; good for early training
                 for ae_index, ae_args in enumerate(autoencoders_args):
-                    errD, errD_real, errD_fake = \
+                    ae_args.epoch_args.errD, ae_args.epoch_args.errD_real, ae_args.epoch_args.errD_fake = \
                         train_gan_d(ae_index, ae_args.train_data[random.randint(0, len(ae_args.train_data)-1)])
 
             # train generator
-            # for i in range(args.niters_gan_g):
-            #    errG = train_gan_g()
+            for i in range(args.niters_gan_g):
+               ae_args.epoch_args.errG = train_gan_g(ae_index)
 
-        for ae, ae_args in zip(autoencoders, autoencoders_args):
+        for ae_index, (ae, ae_args) in enumerate(zip(autoencoders, autoencoders_args)):
             ae_args.epoch_args.niter_global += 1
             if ae_args.epoch_args.niter_global % 100 == 0:
                 msg = ('[%d/%d][%d/%d] Loss_D: %.8f (Loss_D_real: %.8f'
-                    ' Loss_D_fake: %.8f)'  % (epoch, args.epochs, ae_args.epoch_args.niter, len(ae_args.train_data),
-                     errD.data[0], errD_real.data[0],
-                     errD_fake.data[0]))
+                    ' Loss_D_fake: %.8f) Loss_G: %.8f'  % (epoch, args.epochs, ae_args.epoch_args.niter, len(ae_args.train_data),
+                     ae_args.epoch_args.errD.data[0],
+                     ae_args.epoch_args.errD_real.data[0],
+                     ae_args.epoch_args.errD_fake.data[0],
+                     ae_args.epoch_args.errG))
                 print(msg)
-                # with open("./output/{}/logs.txt".format(args.outf), 'a') as f:
-                #     f.write(msg)
+                with open("./output/{}/logs.txt".format(ae_args.outf), 'a') as f:
+                    f.write(msg)
 
                 # exponentially decaying noise on autoencoder
                 ae.noise_radius = ae.noise_radius*ae_args.noise_anneal
 
                 if ae_args.epoch_args.niter_global % 3000 == 0:
-                    # evaluate_generator(fixed_noise, "epoch{}_step{}".
-                    #                    format(epoch, niter_global))
+                    evaluate_generator(ae_index, fixed_noise, "epoch{}_step{}".
+                                       format(epoch, ae_args.epoch_args.niter_global))
 
                     # evaluate with lm
                     if not args.no_earlystopping and epoch > args.min_epochs:
                         # TODO: current implementation requires --no_earlystopping
-                        ppl = train_lm(eval_path=os.path.join(ae_args.data_path,
+                        ppl = train_lm(ae_index, eval_path=os.path.join(ae_args.data_path,
                                                           "test.txt"),
                                    save_path=os.path.abspath("output/{}/"
                                              "epoch{}_step{}_lm_generations".
-                                             format(args.outf, epoch,
+                                             format(ae_args.outf, epoch,
                                                     ae_args.epoch_args.niter_global)))
                         print("Perplexity {}".format(ppl))
-                        all_ppl.append(ppl)
-                        print(all_ppl)
+                        ae_args.epoch_args.all_ppl.append(ppl)
+                        print(ae_args.epoch_args.all_ppl)
                         with open("./output/{}/logs.txt".
                               format(args.outf), 'a') as f:
                             f.write("\n\nPerplexity {}\n".format(ppl))
-                            f.write(str(all_ppl)+"\n\n")
-                        if best_ppl is None or ppl < best_ppl:
+                            f.write(str(ae_args.epoch_args.all_ppl)+"\n\n")
+                        if ae_args.epoch_args.best_ppl is None or ppl < ae_args.epoch_args.best_ppl:
                             impatience = 0
-                            best_ppl = ppl
-                            print("New best ppl {}\n".format(best_ppl))
+                            ae_args.epoch_args.best_ppl = ppl
+                            print("New best ppl {}\n".format(ppl))
                             with open("./output/{}/logs.txt".
-                                  format(args.outf), 'a') as f:
-                                f.write("New best ppl {}\n".format(best_ppl))
-                            save_model()
+                                  format(ae_args.outf), 'a') as f:
+                                f.write("New best ppl {}\n".format(ppl))
+                            save_model() # TODO optional index argument
                         else:
                             impatience += 1
                             # end training
@@ -660,43 +673,45 @@ for epoch in range(1, args.epochs+1):
             format(epoch, (time.time() - ae_args.epoch_args.epoch_start_time),
                  test_loss, math.exp(test_loss), accuracy))
         print('-' * 89)
-        """TODO figure out where to save logs
-        with open("./output/{}/logs.txt".format(args.outf), 'a') as f:
+        with open("./output/{}/logs.txt".format(ae_args.outf), 'a') as f:
             f.write('-' * 89)
             f.write('\n| end of epoch {:3d} | time: {:5.2f}s | test loss {:5.2f} |'
                 ' test ppl {:5.2f} | acc {:3.3f}\n'.
-                format(epoch, (time.time() - epoch_start_time),
+                format(epoch, (time.time() - ae_args.epoch_args.epoch_start_time),
                        test_loss, math.exp(test_loss), accuracy))
             f.write('-' * 89)
             f.write('\n')
-        """
 
-    # evaluate_generator(fixed_noise, "end_of_epoch_{}".format(epoch))
+    for ae_index in range(len(autoencoders_args)):
+        evaluate_generator(ae_index, fixed_noise, "end_of_epoch_{}".format(epoch))
+    
     if not args.no_earlystopping and epoch >= args.min_epochs:
-        ppl = train_lm(eval_path=os.path.join(args.data_path, "test.txt"),
-                       save_path=os.path.abspath("./output/{}/end_of_epoch{}_lm_generations".
-                                 format(args.outf, epoch)))
-        print("Perplexity {}".format(ppl))
-        all_ppl.append(ppl)
-        print(all_ppl)
-        with open("./output/{}/logs.txt".format(args.outf), 'a') as f:
-            f.write("\n\nPerplexity {}\n".format(ppl))
-            f.write(str(all_ppl)+"\n\n")
-        if best_ppl is None or ppl < best_ppl:
-            impatience = 0
-            best_ppl = ppl
-            print("New best ppl {}\n".format(best_ppl))
+        for ae_index, ae_args in enumerate(autoencoders_args):
+            ppl = train_lm(ae_index, 
+                           eval_path=os.path.join(ae_args.data_path, "test.txt"),
+                           save_path=os.path.abspath("./output/{}/end_of_epoch{}_lm_generations".
+                                     format(ae_args.outf, epoch)))
+            print("Perplexity {}".format(ppl))
+            ae_args.epoch_args.all_ppl.append(ppl)
+            print(ae_args.epoch_args.all_ppl)
             with open("./output/{}/logs.txt".format(args.outf), 'a') as f:
-                f.write("New best ppl {}\n".format(best_ppl))
-            save_model()
-        else:
-            impatience += 1
-            # end training
-            if impatience > args.patience:
-                print("Ending training")
+                f.write("\n\nPerplexity {}\n".format(ppl))
+                f.write(str(ae_args.epoch_args.all_ppl)+"\n\n")
+            if ae_args.epoch_args.best_ppl is None or ppl < ae_args.epoch_args.best_ppl:
+                impatience = 0
+                ae_args.epoch_args.best_ppl = ppl
+                print("New best ppl {}\n".format(ppl))
                 with open("./output/{}/logs.txt".format(args.outf), 'a') as f:
-                    f.write("\nEnding Training\n")
-                sys.exit()
+                    f.write("New best ppl {}\n".format(ppl))
+                save_model()
+            else:
+                impatience += 1
+                # end training
+                if impatience > args.patience:
+                    print("Ending training")
+                    with open("./output/{}/logs.txt".format(args.outf), 'a') as f:
+                        f.write("\nEnding Training\n")
+                    sys.exit()
 
     # Save the model at the end of every epoch
     if epoch >= args.min_epochs:
